@@ -24,26 +24,24 @@ def save_signals(signals):
     with open(SIGNALS_FILE, 'w') as f:
         json.dump(signals, f, indent=4)
 
-# Fetch current price using CoinGecko
+# Fetch all CoinGecko coins once
+def fetch_coin_list():
+    url = 'https://api.coingecko.com/api/v3/coins/list'
+    response = requests.get(url)
+    if response.status_code == 200:
+        return {coin['symbol'].upper(): coin['id'] for coin in response.json()}
+    return {}
+
+COIN_LIST = fetch_coin_list()
+
+# Fetch current price
 def get_price(coin_id):
     url = f'https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd'
     response = requests.get(url)
-    data = response.json()
-    return data.get(coin_id, {}).get('usd', None)
-
-# Convert coin symbol to CoinGecko ID
-def get_coin_id(symbol):
-    mapping = {
-        'BTC': 'bitcoin',
-        'ETH': 'ethereum',
-        'BNB': 'binancecoin',
-        'SOL': 'solana',
-        'XRP': 'ripple',
-        'DOGE': 'dogecoin',
-        'ADA': 'cardano',
-        'AVAX': 'avalanche-2'
-    }
-    return mapping.get(symbol.upper())
+    if response.status_code == 200:
+        data = response.json()
+        return data.get(coin_id, {}).get('usd', None)
+    return None
 
 # Monitor prices and send alerts
 def monitor_prices():
@@ -54,10 +52,7 @@ def monitor_prices():
             if signal["hit_stop"] or len(signal["hit_targets"]) == len(signal["targets"]):
                 continue
 
-            coin_id = get_coin_id(signal["coin"])
-            if not coin_id:
-                continue
-
+            coin_id = signal["coin_id"]
             current_price = get_price(coin_id)
             if not current_price:
                 continue
@@ -101,13 +96,19 @@ def handle_message(message):
     try:
         parts = message.text.strip().split()
         if len(parts) != 2:
-            bot.reply_to(message, "Please send: COIN PRICE\nExample: BTC 62000")
+            bot.reply_to(message, "يرجى إرسال: COIN PRICE\nمثال: BTC 62000")
             return
 
         coin = parts[0].upper()
         price = float(parts[1])
-        stop_loss = round(price * 0.98, 4)
-        targets = [round(price * (1 + t / 100), 4) for t in TARGETS]
+
+        if coin not in COIN_LIST:
+            bot.reply_to(message, f"العملة {coin} غير مدعومة حالياً.")
+            return
+
+        coin_id = COIN_LIST[coin]
+        stop_loss = round(price * 0.98, 6)
+        targets = [round(price * (1 + t / 100), 6) for t in TARGETS]
 
         signal_text = f"""#SPOT SIGNAL
 
@@ -129,6 +130,7 @@ def handle_message(message):
         sent = bot.send_message(CHANNEL_ID, signal_text)
         new_signal = {
             "coin": coin,
+            "coin_id": coin_id,
             "entry": price,
             "stop_loss": stop_loss,
             "targets": targets,
