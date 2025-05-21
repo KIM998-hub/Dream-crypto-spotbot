@@ -11,6 +11,24 @@ TARGETS = [1.9, 3.9, 8.6, 18.4, 24.2, 32.3, 40]
 bot = telebot.TeleBot(BOT_TOKEN)
 SIGNALS_FILE = 'signals.json'
 
+coin_symbol_to_id = {}
+
+def update_coin_mapping():
+    global coin_symbol_to_id
+    try:
+        url = 'https://api.coingecko.com/api/v3/coins/list'
+        response = requests.get(url)
+        if response.status_code == 200:
+            data = response.json()
+            coin_symbol_to_id = {item['symbol'].upper(): item['id'] for item in data}
+        else:
+            print("فشل في جلب قائمة العملات.")
+    except Exception as e:
+        print("خطأ في تحديث العملات:", str(e))
+
+def get_coin_id(symbol):
+    return coin_symbol_to_id.get(symbol.upper())
+
 # Load signals from file
 def load_signals():
     try:
@@ -23,16 +41,6 @@ def load_signals():
 def save_signals(signals):
     with open(SIGNALS_FILE, 'w') as f:
         json.dump(signals, f, indent=4)
-
-# Fetch all CoinGecko coins once
-def fetch_coin_list():
-    url = 'https://api.coingecko.com/api/v3/coins/list'
-    response = requests.get(url)
-    if response.status_code == 200:
-        return {coin['symbol'].upper(): coin['id'] for coin in response.json()}
-    return {}
-
-COIN_LIST = fetch_coin_list()
 
 # Fetch current price
 def get_price(coin_id):
@@ -102,11 +110,11 @@ def handle_message(message):
         coin = parts[0].upper()
         price = float(parts[1])
 
-        if coin not in COIN_LIST:
+        coin_id = get_coin_id(coin)
+        if not coin_id:
             bot.reply_to(message, f"العملة {coin} غير مدعومة حالياً.")
             return
 
-        coin_id = COIN_LIST[coin]
         stop_loss = round(price * 0.98, 6)
         targets = [round(price * (1 + t / 100), 6) for t in TARGETS]
 
@@ -146,6 +154,9 @@ def handle_message(message):
 
     except Exception as e:
         bot.reply_to(message, f"Error: {str(e)}")
+
+# تحديث قائمة العملات أولاً
+update_coin_mapping()
 
 # Start price monitoring thread
 threading.Thread(target=monitor_prices, daemon=True).start()
