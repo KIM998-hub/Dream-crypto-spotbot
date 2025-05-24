@@ -1,4 +1,86 @@
+from flask import Flask, request
 import telebot
+import requests
+from PIL import Image, ImageDraw, ImageFont
+from io import BytesIO
+
+API_TOKEN = '7653756929:AAFVze2LSOW_dw1NhxUTGlPtiQ5VN-mzRao'
+CHANNEL_ID = '-1002509422719'
+bot = telebot.TeleBot(API_TOKEN)
+app = Flask(__name__)
+
+TARGET_PERCENTS = [1.9, 3.9, 8.6, 18.4, 24.2, 32.3, 40.0]
+STOP_LOSS_PERCENT = 2.0
+
+def format_price(p):
+    return f"{round(p, 4)}"
+
+def get_coin_data(symbol):
+    url = "https://api.coingecko.com/api/v3/coins/list"
+    coins = requests.get(url).json()
+    coin = next((c for c in coins if c['symbol'].lower() == symbol.lower()), None)
+    if not coin:
+        return None
+    coin_id = coin['id']
+    coin_info = requests.get(f"https://api.coingecko.com/api/v3/coins/{coin_id}").json()
+    return {
+        "name": coin_info['name'],
+        "logo": coin_info['image']['large']
+    }
+
+def generate_image(coin_name, logo_url, entry_price, stop_loss):
+    W, H = (800, 300)
+    image = Image.new("RGB", (W, H), "#0d1117")
+    draw = ImageDraw.Draw(image)
+    title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 36)
+    font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 28)
+    draw.text((20, 20), f"DreamCryptoSpot Signal", font=title_font, fill="#ffffff")
+    draw.text((20, 90), f"Coin: {coin_name}", font=font, fill="#f2a900")
+    draw.text((20, 150), f"Entry: {entry_price}", font=font, fill="#00ffcc")
+    draw.text((20, 200), f"Stop Loss: {stop_loss}", font=font, fill="#ff4c4c")
+    try:
+        logo = Image.open(BytesIO(requests.get(logo_url).content)).convert("RGBA")
+        logo = logo.resize((80, 80))
+        image.paste(logo, (700, 30), logo)
+    except:
+        pass
+    output = BytesIO()
+    image.save(output, format='PNG')
+    output.seek(0)
+    return output
+
+@bot.message_handler(func=lambda message: True)
+def handle_message(message):
+    try:
+        parts = message.text.split()
+        if len(parts) != 2:
+            bot.reply_to(message, "Please send in format: COIN PRICE")
+            return
+        coin = parts[0].upper()
+        entry = float(parts[1])
+        stop_loss = round(entry * (1 - STOP_LOSS_PERCENT / 100), 4)
+        targets = [round(entry * (1 + p / 100), 4) for p in TARGET_PERCENTS]
+        coin_data = get_coin_data(coin)
+        if not coin_data:
+            bot.reply_to(message, f"Coin {coin} not found on CoinGecko.")
+            return
+        img = generate_image(coin_data['name'], coin_data['logo'], format_price(entry), format_price(stop_loss))
+        bot.send_photo(CHANNEL_ID, img)
+        text = f"""<b>🔥 🚨 NEW SPOT SIGNAL 🚨 🔥</b>
+
+<b>🪙 Coin:</b> <code>{coin}</code>
+<b>🎯 Entry Price:</b> <code>{format_price(entry)}</code>
+<b>🛑 Stop Loss:</b> <code>{format_price(stop_loss)}</code>
+
+<b>🎯 Target Levels:</b>
+""" + '\n'.join([f"➤ <code>{format_price(t)}</code>" for t in targets]) + """
+
+#DreamCryptoSpot #CryptoSignals"""
+        bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
+    except Exception as e:
+        bot.reply_to(message, f"Error: {e}")
+
+@app.rimport telebot
 import json
 import time
 import threading
@@ -148,11 +230,6 @@ def handle_message(message):
     except Exception as e:
         bot.reply_to(message, f"Error: {str(e)}")
 
-def start_monitoring():
-    monitor_thread = threading.Thread(target=monitor_prices)
-    monitor_thread.daemon = True
-    monitor_thread.start()
-
-if __name__ == '__main__':
-    start_monitoring()
-    bot.infinity_polling()
+# Start monitoring and bot polling
+start_monitoring()
+bot.infinity_polling()
