@@ -1,164 +1,154 @@
-import telebot
+import os
 import json
-import time
-import threading
+import telebot
 import requests
+from flask import Flask, request
 from datetime import datetime
+import threading
+import time
 
-# إعدادات البوت
-BOT_TOKEN = '6852022357:AAE2gCznYWB67eWBhRuVKk4JKy7E5CkUex4'
-CHANNEL_ID = '@Dreamcryptospotsignals'
-SIGNALS_FILE = 'signals.json'
-TARGETS = [1.9, 3.9, 8.6, 18.4, 24.2, 32.3, 40]
+# Telegram config
+TOKEN = "7653756929:AAFVze2LSOW_dw1NhxUTGlPtiQ5VN-mzRao"
+CHANNEL_ID = "@Dreamcryptospot"
+bot = telebot.TeleBot(TOKEN)
 
-bot = telebot.TeleBot(BOT_TOKEN)
+# Price monitor settings
+CHECK_INTERVAL = 60  # seconds
 
-# تحميل التوصيات من الملف
+# Create Flask app
+app = Flask(__name__)
+
+# Signal data storage
+SIGNALS_FILE = "signals.json"
+if not os.path.exists(SIGNALS_FILE):
+    with open(SIGNALS_FILE, "w") as f:
+        json.dump({}, f)
+
+# Load signals
 def load_signals():
+    with open(SIGNALS_FILE, "r") as f:
+        return json.load(f)
+
+# Save signals
+def save_signals(data):
+    with open(SIGNALS_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+# Create signal message
+def create_signal_message(coin, entry, sl, targets):
+    message = f"تم نشر توصية جديدة\n\n"
+    message += f"العملة: {coin.upper()}\n"
+    message += f"منطقة الدخول: {entry:.4f}\n"
+    message += f"وقف الخسارة: {sl:.4f}\n\n"
+    for i, t in enumerate(targets):
+        message += f"الهدف {i+1}: {t:.4f}\n"
+    message += "\nبالتوفيق!"
+    return message
+
+# Get price from CoinGecko
+def get_price(coin):
     try:
-        with open(SIGNALS_FILE, 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return []
+        url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin}&vs_currencies=usd"
+        response = requests.get(url).json()
+        return float(response[coin]["usd"])
+    except:
+        return None
 
-# حفظ التوصيات في الملف
-def save_signals(signals):
-    with open(SIGNALS_FILE, 'w') as f:
-        json.dump(signals, f, indent=4)
-
-# جلب قائمة العملات من CoinGecko
-def fetch_coin_list():
-    url = 'https://api.coingecko.com/api/v3/coins/list'
-    response = requests.get(url)
-    if response.status_code == 200:
-        return {coin['symbol'].upper(): coin['id'] for coin in response.json()}
-    return {}
-
-COIN_LIST = fetch_coin_list()
-
-# جلب السعر الحالي
-def get_price(coin_id):
-    url = f'https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd'
-    response = requests.get(url)
-    if response.status_code == 200:
-        data = response.json()
-        return data.get(coin_id, {}).get('usd', None)
-    return None
-
-# مراقبة الأسعار
-def monitor_prices():
+# Monitor thread
+def price_monitor():
     while True:
         signals = load_signals()
         updated = False
-        for signal in signals:
-            if signal["hit_stop"] or len(signal["hit_targets"]) == len(signal["targets"]):
+        for coin, data in signals.items():
+            if data.get("hit"):
                 continue
-
-            coin_id = signal["coin_id"]
-            current_price = get_price(coin_id)
-            print(f"[{datetime.now()}] {signal['coin']} price: {current_price}")
-
-            if not current_price:
+            price = get_price(data["cg_id"])
+            if not price:
                 continue
 
             now = time.time()
-            duration = lambda ts: round((now - ts) / 60)
+            duration = int(now - data["timestamp"])
+            minutes = duration // 60
 
-            # التحقق من الأهداف
-            for i, target in enumerate(signal["targets"]):
-                if i not in signal["hit_targets"] and current_price >= target:
-                    msg = f"""🎯 الهدف رقم {i+1} تحقق لعملة {signal["coin"]}!
-
-المدة: {duration(signal["timestamp"])} دقيقة.
-السعر الحالي: {current_price}
-الهدف: {target}
-"""
-                    bot.send_message(CHANNEL_ID, msg, reply_to_message_id=signal["message_id"])
-                    signal["hit_targets"].append(i)
+            for i, target in enumerate(data["targets"]):
+                if not data["hits"][i] and price >= target:
+                    msg = f"🎯 تم تحقيق الهدف {i+1} لعملة {coin.upper()} خلال {minutes} دقيقة"
+                    bot.send_message(CHANNEL_ID, msg, reply_to_message_id=data["msg_id"])
+                    data["hits"][i] = True
                     updated = True
-                    break
 
-            # التحقق من وقف الخسارة
-            if not signal["hit_stop"] and current_price <= signal["stop_loss"]:
-                msg = f"""❌ تم ضرب وقف الخسارة لعملة {signal["coin"]}
-
-المدة: {duration(signal["timestamp"])} دقيقة.
-السعر الحالي: {current_price}
-وقف الخسارة: {signal["stop_loss"]}
-"""
-                bot.send_message(CHANNEL_ID, msg, reply_to_message_id=signal["message_id"])
-                signal["hit_stop"] = True
+            if not data["sl_hit"] and price <= data["stoploss"]:
+                msg = f"⛔ تم ضرب وقف الخسارة لعملة {coin.upper()} خلال {minutes} دقيقة"
+                bot.send_message(CHANNEL_ID, msg, reply_to_message_id=data["msg_id"])
+                data["sl_hit"] = True
                 updated = True
+
+            if all(data["hits"]) or data["sl_hit"]:
+                data["hit"] = True
 
         if updated:
             save_signals(signals)
+        time.sleep(CHECK_INTERVAL)
 
-        time.sleep(60)
+# Start monitor thread
+threading.Thread(target=price_monitor, daemon=True).start()
 
-# استقبال الرسائل من المستخدم
-@bot.message_handler(func=lambda msg: True)
+# Handle signal messages
+@bot.message_handler(func=lambda message: True)
 def handle_message(message):
     try:
         parts = message.text.strip().split()
         if len(parts) != 2:
-            bot.reply_to(message, "يرجى إرسال: COIN PRICE\nمثال: BTC 62000")
             return
+        coin = parts[0].lower()
+        entry = float(parts[1])
+        sl = round(entry * 0.98, 4)
+        targets = [round(entry * r, 4) for r in [1.019, 1.039, 1.086, 1.184, 1.242, 1.323, 1.40]]
 
-        coin = parts[0].upper()
-        price = float(parts[1])
-
-        if coin not in COIN_LIST:
-            bot.reply_to(message, f"العملة {coin} غير مدعومة حالياً.")
+        # Get CoinGecko ID
+        cg_data = requests.get("https://api.coingecko.com/api/v3/coins/list").json()
+        match = next((c for c in cg_data if c["symbol"].lower() == coin), None)
+        if not match:
+            bot.reply_to(message, f"لم أتمكن من التعرف على العملة: {coin.upper()}")
             return
+        cg_id = match["id"]
 
-        coin_id = COIN_LIST[coin]
-        stop_loss = round(price * 0.98, 6)
-        targets = [round(price * (1 + t / 100), 6) for t in TARGETS]
+        msg = create_signal_message(coin, entry, sl, targets)
+        sent = bot.send_message(CHANNEL_ID, msg)
+        msg_id = sent.message_id
 
-        signal_text = f"""#SPOT SIGNAL
-
-عملة: {coin}
-سعر الدخول: {price}
-وقف الخسارة: {stop_loss}
-
-الأهداف:
-1. {targets[0]}
-2. {targets[1]}
-3. {targets[2]}
-4. {targets[3]}
-5. {targets[4]}
-6. {targets[5]}
-7. {targets[6]}
-
-#DreamCryptoSpot
-"""
-        sent = bot.send_message(CHANNEL_ID, signal_text)
-        new_signal = {
-            "coin": coin,
-            "coin_id": coin_id,
-            "entry": price,
-            "stop_loss": stop_loss,
-            "targets": targets,
-            "hit_targets": [],
-            "hit_stop": False,
-            "timestamp": time.time(),
-            "message_id": sent.message_id
-        }
-
+        # Save signal
         signals = load_signals()
-        signals.append(new_signal)
+        signals[coin] = {
+            "coin": coin,
+            "cg_id": cg_id,
+            "entry": entry,
+            "stoploss": sl,
+            "targets": targets,
+            "hits": [False] * len(targets),
+            "sl_hit": False,
+            "hit": False,
+            "timestamp": time.time(),
+            "msg_id": msg_id
+        }
         save_signals(signals)
 
     except Exception as e:
-        bot.reply_to(message, f"Error: {str(e)}")
+        print("Error:", e)
 
-# بدء المراقبة في خلفية منفصلة
-def start_monitoring():
-    monitor_thread = threading.Thread(target=monitor_prices)
-    monitor_thread.daemon = True
-    monitor_thread.start()
+# Webhook route
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    update = telebot.types.Update.de_json(request.stream.read().decode("utf-8"))
+    bot.process_new_updates([update])
+    return "OK", 200
 
-# تشغيل البوت
-if __name__ == '__main__':
-    start_monitoring()
-    bot.infinity_polling()
+# Root route
+@app.route("/", methods=["GET"])
+def home():
+    return "Bot is running", 200
+
+# Run
+if __name__ == "__main__":
+    from waitress import serve
+    serve(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
