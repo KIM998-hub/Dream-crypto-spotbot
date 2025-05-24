@@ -5,13 +5,15 @@ import threading
 import requests
 from datetime import datetime
 
-BOT_TOKEN = '7653756929:AAFVze2LSOW_dw1NhxUTGlPtiQ5VN-mzRao'
+# إعدادات البوت
+BOT_TOKEN = '6852022357:AAE2gCznYWB67eWBhRuVKk4JKy7E5CkUex4'
 CHANNEL_ID = '@Dreamcryptospotsignals'
-TARGETS = [1.9, 3.9, 8.6, 18.4, 24.2, 32.3, 40]
-bot = telebot.TeleBot(BOT_TOKEN)
 SIGNALS_FILE = 'signals.json'
+TARGETS = [1.9, 3.9, 8.6, 18.4, 24.2, 32.3, 40]
 
-# Load signals from file
+bot = telebot.TeleBot(BOT_TOKEN)
+
+# تحميل التوصيات من الملف
 def load_signals():
     try:
         with open(SIGNALS_FILE, 'r') as f:
@@ -19,12 +21,12 @@ def load_signals():
     except FileNotFoundError:
         return []
 
-# Save signals to file
+# حفظ التوصيات في الملف
 def save_signals(signals):
     with open(SIGNALS_FILE, 'w') as f:
         json.dump(signals, f, indent=4)
 
-# Fetch all CoinGecko coins once
+# جلب قائمة العملات من CoinGecko
 def fetch_coin_list():
     url = 'https://api.coingecko.com/api/v3/coins/list'
     response = requests.get(url)
@@ -34,7 +36,7 @@ def fetch_coin_list():
 
 COIN_LIST = fetch_coin_list()
 
-# Fetch current price
+# جلب السعر الحالي
 def get_price(coin_id):
     url = f'https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd'
     response = requests.get(url)
@@ -43,7 +45,7 @@ def get_price(coin_id):
         return data.get(coin_id, {}).get('usd', None)
     return None
 
-# Monitor prices and send alerts
+# مراقبة الأسعار
 def monitor_prices():
     while True:
         signals = load_signals()
@@ -55,13 +57,14 @@ def monitor_prices():
             coin_id = signal["coin_id"]
             current_price = get_price(coin_id)
             print(f"[{datetime.now()}] {signal['coin']} price: {current_price}")
+
             if not current_price:
                 continue
 
             now = time.time()
             duration = lambda ts: round((now - ts) / 60)
 
-            # Check targets
+            # التحقق من الأهداف
             for i, target in enumerate(signal["targets"]):
                 if i not in signal["hit_targets"] and current_price >= target:
                     msg = f"""🎯 الهدف رقم {i+1} تحقق لعملة {signal["coin"]}!
@@ -75,7 +78,7 @@ def monitor_prices():
                     updated = True
                     break
 
-            # Check stop-loss
+            # التحقق من وقف الخسارة
             if not signal["hit_stop"] and current_price <= signal["stop_loss"]:
                 msg = f"""❌ تم ضرب وقف الخسارة لعملة {signal["coin"]}
 
@@ -92,6 +95,7 @@ def monitor_prices():
 
         time.sleep(60)
 
+# استقبال الرسائل من المستخدم
 @bot.message_handler(func=lambda msg: True)
 def handle_message(message):
     try:
@@ -148,6 +152,13 @@ def handle_message(message):
     except Exception as e:
         bot.reply_to(message, f"Error: {str(e)}")
 
-# Start monitoring and bot polling
-start_monitoring()
-bot.infinity_polling()
+# بدء المراقبة في خلفية منفصلة
+def start_monitoring():
+    monitor_thread = threading.Thread(target=monitor_prices)
+    monitor_thread.daemon = True
+    monitor_thread.start()
+
+# تشغيل البوت
+if __name__ == '__main__':
+    start_monitoring()
+    bot.infinity_polling()
