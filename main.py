@@ -1,147 +1,145 @@
 import telebot
 import json
+import os
 import time
+import threading
 from datetime import datetime
 from pycoingecko import CoinGeckoAPI
-import threading
 
-# إعدادات البوت
-TOKEN = "7653756929:AAFVze2LSOW_dw1NhxUTGlPtiQ5VN-mzRao"
-CHANNEL_ID = -1002026068158  # معرف القناة Dream crypto spot signals
+TOKEN = '7653756929:AAFVze2LSOW_dw1NhxUTGlPtiQ5VN-mzRao'
+CHANNEL_ID = -1002509422719
+SIGNALS_FILE = 'signals.json'
+
 bot = telebot.TeleBot(TOKEN)
 cg = CoinGeckoAPI()
 
-# تحميل الإشارات
-def load_signals():
-    try:
-        with open("signals.json", "r") as f:
-            return json.load(f)
-    except:
-        return []
+TARGET_PERCENTS = [1.9, 3.9, 8.6, 18.4, 24.2, 32.3, 40.0]
+STOP_LOSS_PERCENT = 2
 
-# حفظ الإشارات
+def load_signals():
+    if not os.path.exists(SIGNALS_FILE):
+        return []
+    with open(SIGNALS_FILE, 'r') as f:
+        return json.load(f)
+
 def save_signals(signals):
-    with open("signals.json", "w") as f:
+    with open(SIGNALS_FILE, 'w') as f:
         json.dump(signals, f, indent=2)
 
-# حساب الأهداف والستوب
-def calculate_targets(entry):
-    targets = [round(entry * (1 + p), 4) for p in [0.019, 0.039, 0.086, 0.184, 0.242, 0.323, 0.4]]
-    stop_loss = round(entry * 0.98, 4)
-    return targets, stop_loss
-
-# نشر التوصية
-def send_signal(coin, entry, targets, stop_loss, timestamp):
-    message = f"""صفقة جديدة
+def format_signal_text(coin, entry, targets, stop_loss):
+    text = f"""إشارة سبوت
 
 العملة: {coin.upper()}
-سعر الدخول: {entry}
-الستوب: {stop_loss}
+منطقة الدخول: {entry}
 
 الأهداف:
-1️⃣ {targets[0]}
-2️⃣ {targets[1]}
-3️⃣ {targets[2]}
-4️⃣ {targets[3]}
-5️⃣ {targets[4]}
-6️⃣ {targets[5]}
-7️⃣ {targets[6]}
-
-الوقت: {timestamp}
 """
-    sent = bot.send_message(CHANNEL_ID, message)
-    return sent.message_id
+    for i, target in enumerate(targets):
+        text += f"الهدف {i+1}: {target:.2f}\n"
+    text += f"\nمنطقة وقف الخسارة: {stop_loss:.2f}"
+    return text
 
-# مراقبة التحقق من الأهداف والستوب
-def check_targets_loop():
+def monitor_targets():
     while True:
         signals = load_signals()
+        changed = False
+
         for signal in signals:
-            if len(signal["hit_targets"]) >= 7 or signal.get("hit_stop", False):
+            if "hit" not in signal:
+                signal["hit"] = []
+
+            if len(signal["hit"]) >= 7 or signal.get("stop_hit"):
                 continue
 
-            coin_id = signal["coin"].lower()
             try:
-                data = cg.get_price(ids=coin_id, vs_currencies='usd')
-                price = data[coin_id]["usd"]
-                now = datetime.now()
+                coin_id = signal["coin"].lower()
                 entry = signal["entry"]
+                stop = signal["stop_loss"]
+                targets = signal["targets"]
+                message_id = signal["message_id"]
+
+                price_data = cg.get_price(ids=coin_id, vs_currencies='usd')
+                price = price_data[coin_id]["usd"]
+                now = datetime.utcnow()
 
                 # تحقق الأهداف
-                for i, target in enumerate(signal["targets"]):
-                    if i in signal["hit_targets"]:
+                for i, target in enumerate(targets):
+                    if i in signal["hit"] or price < target:
                         continue
-                    if price >= target:
-                        signal["hit_targets"].append(i)
-                        percent = round(((target - entry) / entry) * 100, 2)
-                        elapsed = datetime.now() - datetime.strptime(signal["timestamp"], "%Y-%m-%d %H:%M:%S")
-                        bot.send_message(
-                            CHANNEL_ID,
-                            f"""🎯 الهدف رقم {i+1} تحقق للعملة {signal['coin'].upper()}
-السعر: {price}
-النسبة: +{percent}%
-المدة: {str(elapsed).split('.')[0]}""",
-                            reply_to_message_id=signal["message_id"]
-                        )
 
-                # تحقق الستوب
-                if not signal.get("hit_stop") and price <= signal["stop_loss"]:
-                    signal["hit_stop"] = True
-                    percent = round(((price - entry) / entry) * 100, 2)
-                    elapsed = datetime.now() - datetime.strptime(signal["timestamp"], "%Y-%m-%d %H:%M:%S")
+                    signal["hit"].append(i)
+                    percent = round(((target - entry) / entry) * 100, 2)
+                    duration = now - datetime.fromisoformat(signal["posted_at"])
+                    duration_str = str(duration).split('.')[0]
+
                     bot.send_message(
                         CHANNEL_ID,
-                        f"""⛔ تم ضرب الستوب للعملة {signal['coin'].upper()}
-السعر: {price}
-النسبة: {percent}%
-المدة: {str(elapsed).split('.')[0]}""",
-                        reply_to_message_id=signal["message_id"]
+                        f"""🎯 الهدف {i+1} تحقق لـ {coin_id.upper()}
+السعر الحالي: {price}
+النسبة: +{percent}%
+المدة: {duration_str}""",
+                        reply_to_message_id=message_id
                     )
+                    changed = True
+
+                # تحقق الستوب
+                if not signal.get("stop_hit") and price <= stop:
+                    signal["stop_hit"] = True
+                    percent = round(((price - entry) / entry) * 100, 2)
+                    duration = now - datetime.fromisoformat(signal["posted_at"])
+                    duration_str = str(duration).split('.')[0]
+
+                    bot.send_message(
+                        CHANNEL_ID,
+                        f"""⛔ تم ضرب الستوب لـ {coin_id.upper()}
+السعر الحالي: {price}
+النسبة: {percent}%
+المدة: {duration_str}""",
+                        reply_to_message_id=message_id
+                    )
+                    changed = True
 
             except Exception as e:
-                print("خطأ:", e)
+                print("خطأ في التحقق:", e)
 
-        save_signals(signals)
+        if changed:
+            save_signals(signals)
+
         time.sleep(60)
 
-# أمر /start
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message, "أرسل اسم العملة وسعر الدخول بهذا الشكل:\nمثال: BTC 64200")
-
-# استقبال التوصية
 @bot.message_handler(func=lambda message: True)
 def handle_signal(message):
     try:
         parts = message.text.strip().split()
         if len(parts) != 2:
+            bot.reply_to(message, "الرجاء إرسال الإشارة بهذا الشكل:\nBTC 64123.5")
             return
 
-        coin = parts[0].lower()
+        coin = parts[0].upper()
         entry = float(parts[1])
-        targets, stop_loss = calculate_targets(entry)
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        stop_loss = round(entry * (1 - STOP_LOSS_PERCENT / 100), 4)
+        targets = [round(entry * (1 + p / 100), 4) for p in TARGET_PERCENTS]
 
-        signal = {
+        signal_text = format_signal_text(coin, entry, targets, stop_loss)
+        sent = bot.send_message(CHANNEL_ID, signal_text)
+
+        signals = load_signals()
+        signals.append({
             "coin": coin,
             "entry": entry,
             "targets": targets,
             "stop_loss": stop_loss,
-            "timestamp": timestamp,
-            "message_id": None,
-            "hit_targets": []
-        }
-
-        message_id = send_signal(coin, entry, targets, stop_loss, timestamp)
-        signal["message_id"] = message_id
-
-        signals = load_signals()
-        signals.append(signal)
+            "message_id": sent.message_id,
+            "posted_at": datetime.utcnow().isoformat(),
+            "hit": []
+        })
         save_signals(signals)
 
+        bot.reply_to(message, "تم نشر الإشارة بنجاح.")
     except Exception as e:
         bot.reply_to(message, f"حدث خطأ: {e}")
 
-# بدء المراقبة وتشغيل البوت
-threading.Thread(target=check_targets_loop, daemon=True).start()
+# بدء حلقة التتبع في خيط منفصل
+threading.Thread(target=monitor_targets, daemon=True).start()
+
 bot.infinity_polling()
