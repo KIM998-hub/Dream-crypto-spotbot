@@ -16,6 +16,13 @@ cg = CoinGeckoAPI()
 TARGET_PERCENTS = [1.9, 3.9, 8.6, 18.4, 24.2, 32.3, 40.0]
 STOP_LOSS_PERCENT = 2
 
+def get_coin_id_from_symbol(symbol):
+    coins = cg.get_coins_list()
+    for coin in coins:
+        if coin['symbol'].lower() == symbol.lower():
+            return coin['id']
+    raise ValueError(f"Coin symbol '{symbol}' not found on CoinGecko")
+
 def load_signals():
     if not os.path.exists(SIGNALS_FILE):
         return []
@@ -27,16 +34,16 @@ def save_signals(signals):
         json.dump(signals, f, indent=2)
 
 def format_signal_text(coin, entry, targets, stop_loss):
-    text = f"""إشارة سبوت
+    text = f"""Spot Signal
 
-العملة: {coin.upper()}
-منطقة الدخول: {entry}
+Coin: {coin.upper()}
+Entry Zone: {entry}
 
-الأهداف:
+Targets:
 """
     for i, target in enumerate(targets):
-        text += f"الهدف {i+1}: {target:.2f}\n"
-    text += f"\nمنطقة وقف الخسارة: {stop_loss:.2f}"
+        text += f"Target {i+1}: {target:.2f}\n"
+    text += f"\nStop-loss Zone: {stop_loss:.2f}"
     return text
 
 def monitor_targets():
@@ -52,7 +59,7 @@ def monitor_targets():
                 continue
 
             try:
-                coin_id = signal["coin"].lower()
+                coin_id = get_coin_id_from_symbol(signal["coin"])
                 entry = signal["entry"]
                 stop = signal["stop_loss"]
                 targets = signal["targets"]
@@ -62,7 +69,7 @@ def monitor_targets():
                 price = price_data[coin_id]["usd"]
                 now = datetime.utcnow()
 
-                # تحقق الأهداف
+                # Target checking
                 for i, target in enumerate(targets):
                     if i in signal["hit"] or price < target:
                         continue
@@ -74,15 +81,15 @@ def monitor_targets():
 
                     bot.send_message(
                         CHANNEL_ID,
-                        f"""🎯 الهدف {i+1} تحقق لـ {coin_id.upper()}
-السعر الحالي: {price}
-النسبة: +{percent}%
-المدة: {duration_str}""",
+                        f"""🎯 Target {i+1} hit for {signal["coin"].upper()}
+Current Price: {price}
+Gain: +{percent}%
+Time Taken: {duration_str}""",
                         reply_to_message_id=message_id
                     )
                     changed = True
 
-                # تحقق الستوب
+                # Stop-loss checking
                 if not signal.get("stop_hit") and price <= stop:
                     signal["stop_hit"] = True
                     percent = round(((price - entry) / entry) * 100, 2)
@@ -91,16 +98,16 @@ def monitor_targets():
 
                     bot.send_message(
                         CHANNEL_ID,
-                        f"""⛔ تم ضرب الستوب لـ {coin_id.upper()}
-السعر الحالي: {price}
-النسبة: {percent}%
-المدة: {duration_str}""",
+                        f"""⛔ Stop-loss hit for {signal["coin"].upper()}
+Current Price: {price}
+Loss: {percent}%
+Time Taken: {duration_str}""",
                         reply_to_message_id=message_id
                     )
                     changed = True
 
             except Exception as e:
-                print("خطأ في التحقق:", e)
+                print("Error in monitoring:", e)
 
         if changed:
             save_signals(signals)
@@ -112,7 +119,7 @@ def handle_signal(message):
     try:
         parts = message.text.strip().split()
         if len(parts) != 2:
-            bot.reply_to(message, "الرجاء إرسال الإشارة بهذا الشكل:\nBTC 64123.5")
+            bot.reply_to(message, "Please send the signal in this format:\nBTC 64123.5")
             return
 
         coin = parts[0].upper()
@@ -135,11 +142,11 @@ def handle_signal(message):
         })
         save_signals(signals)
 
-        bot.reply_to(message, "تم نشر الإشارة بنجاح.")
+        bot.reply_to(message, "Signal successfully published.")
     except Exception as e:
-        bot.reply_to(message, f"حدث خطأ: {e}")
+        bot.reply_to(message, f"An error occurred: {e}")
 
-# بدء حلقة التتبع في خيط منفصل
+# Start monitoring in a background thread
 threading.Thread(target=monitor_targets, daemon=True).start()
 
 bot.infinity_polling()
