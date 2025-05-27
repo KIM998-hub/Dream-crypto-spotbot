@@ -44,7 +44,6 @@ Entry Zone: {entry}
     return text
 
 def monitor_targets():
-    print("Monitoring thread started.")
     while True:
         signals = load_signals()
         changed = False
@@ -67,6 +66,7 @@ def monitor_targets():
                 price = price_data[coin_id]["usd"]
                 now = datetime.utcnow()
 
+                # Target checking
                 for i, target in enumerate(targets):
                     if i in signal["hit"] or price < target:
                         continue
@@ -86,6 +86,7 @@ Time elapsed: {duration_str}""",
                     )
                     changed = True
 
+                # Stop-loss checking
                 if not signal.get("stop_hit") and price <= stop:
                     signal["stop_hit"] = True
                     percent = round(((price - entry) / entry) * 100, 2)
@@ -142,7 +143,8 @@ def handle_signal(message):
     except Exception as e:
         bot.reply_to(message, f"Error: {e}")
 
-if __name__ == '__main__':
-    print("Starting bot with polling...")
-    threading.Thread(target=monitor_targets, daemon=True).start()
-    bot.infinity_polling()
+# Start monitoring thread
+threading.Thread(target=monitor_targets, daemon=True).start()
+
+bot.remove_webhook()  # هذا السطر هو المفتاح
+bot.infinity_polling()
