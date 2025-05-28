@@ -1,150 +1,89 @@
 import telebot
 import json
-import os
 import time
-import threading
 from datetime import datetime
-from pycoingecko import CoinGeckoAPI
-from dotenv import load_dotenv
+import os
+from utils.image_generator import generate_signal_image
+from utils.signal_formatter import format_signal_message
+from utils.price_monitor import start_monitoring
 
-load_dotenv()
-TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-CHANNEL_ID = int(os.getenv('CHANNEL_ID'))
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+CHANNEL_ID = os.environ.get("CHANNEL_ID")
 
-SIGNALS_FILE = 'signals.json'
+bot = telebot.TeleBot(BOT_TOKEN)
 
-bot = telebot.TeleBot(TOKEN)
-cg = CoinGeckoAPI()
+# تحميل الإشارات السابقة من الملف
+if os.path.exists("signals.json"):
+    with open("signals.json", "r") as f:
+        signals = json.load(f)
+else:
+    signals = {}
 
-TARGET_PERCENTS = [1.9, 3.9, 8.6, 18.4, 24.2, 32.3, 40.0]
-STOP_LOSS_PERCENT = 2
-
-def load_signals():
-    if not os.path.exists(SIGNALS_FILE):
-        return []
-    with open(SIGNALS_FILE, 'r') as f:
-        return json.load(f)
-
-def save_signals(signals):
-    with open(SIGNALS_FILE, 'w') as f:
-        json.dump(signals, f, indent=2)
-
-def format_signal_text(coin, entry, targets, stop_loss):
-    text = f"""🚨 New SPOT Signal 🚨
-
-Coin: {coin.upper()}
-Entry Zone: {entry}
-
-🎯 Targets:
-"""
-    for i, target in enumerate(targets):
-        text += f"Target {i+1}: {target:.2f}\n"
-    text += f"\n⛔ Stop-loss: {stop_loss:.2f}\n"
-    text += "\n#DreamCryptoSpot #CryptoSignals"
-    return text
-
-def monitor_targets():
-    while True:
-        signals = load_signals()
-        changed = False
-
-        for signal in signals:
-            if "hit" not in signal:
-                signal["hit"] = []
-
-            if len(signal["hit"]) >= 7 or signal.get("stop_hit"):
-                continue
-
-            try:
-                coin_id = signal["coin"].lower()
-                entry = signal["entry"]
-                stop = signal["stop_loss"]
-                targets = signal["targets"]
-                message_id = signal["message_id"]
-
-                price_data = cg.get_price(ids=coin_id, vs_currencies='usd')
-                price = price_data[coin_id]["usd"]
-                now = datetime.utcnow()
-
-                # Target checking
-                for i, target in enumerate(targets):
-                    if i in signal["hit"] or price < target:
-                        continue
-
-                    signal["hit"].append(i)
-                    percent = round(((target - entry) / entry) * 100, 2)
-                    duration = now - datetime.fromisoformat(signal["posted_at"])
-                    duration_str = str(duration).split('.')[0]
-
-                    bot.send_message(
-                        CHANNEL_ID,
-                        f"""🎯 Target {i+1} hit for {coin_id.upper()}
-Current Price: {price}
-Profit: +{percent}%
-Time elapsed: {duration_str}""",
-                        reply_to_message_id=message_id
-                    )
-                    changed = True
-
-                # Stop-loss checking
-                if not signal.get("stop_hit") and price <= stop:
-                    signal["stop_hit"] = True
-                    percent = round(((price - entry) / entry) * 100, 2)
-                    duration = now - datetime.fromisoformat(signal["posted_at"])
-                    duration_str = str(duration).split('.')[0]
-
-                    bot.send_message(
-                        CHANNEL_ID,
-                        f"""⛔ Stop-loss hit for {coin_id.upper()}
-Current Price: {price}
-Loss: {percent}%
-Time elapsed: {duration_str}""",
-                        reply_to_message_id=message_id
-                    )
-                    changed = True
-
-            except Exception as e:
-                print("Error during monitoring:", e)
-
-        if changed:
-            save_signals(signals)
-
-        time.sleep(60)
+@bot.message_handler(commands=['start'])
+def handle_start(message):
+    bot.reply_to(message, "أهلاً بك! أرسل اسم العملة وسعر الدخول فقط (مثال: ETH 2745)")
 
 @bot.message_handler(func=lambda message: True)
 def handle_signal(message):
     try:
-        parts = message.text.strip().split()
+        parts = message.text.split()
         if len(parts) != 2:
-            bot.reply_to(message, "Please send the signal in this format:\nBTC 64123.5")
+            bot.reply_to(message, "❌ صيغة غير صحيحة. أرسل اسم العملة وسعر الدخول فقط (مثال: ETH 2745)")
             return
 
         coin = parts[0].upper()
         entry = float(parts[1])
-        stop_loss = round(entry * (1 - STOP_LOSS_PERCENT / 100), 4)
-        targets = [round(entry * (1 + p / 100), 4) for p in TARGET_PERCENTS]
 
-        signal_text = format_signal_text(coin, entry, targets, stop_loss)
-        sent = bot.send_message(CHANNEL_ID, signal_text)
+        stop_loss = round(entry * 0.98, 4)
+        targets = [
+            round(entry * 1.019, 4),
+            round(entry * 1.039, 4),
+            round(entry * 1.086, 4),
+            round(entry * 1.184, 4),
+            round(entry * 1.242, 4),
+            round(entry * 1.323, 4),
+            round(entry * 1.4, 4)
+        ]
 
-        signals = load_signals()
-        signals.append({
+        timestamp = time.time()
+        signal_id = str(int(timestamp))
+
+        signals[signal_id] = {
             "coin": coin,
             "entry": entry,
-            "targets": targets,
             "stop_loss": stop_loss,
-            "message_id": sent.message_id,
-            "posted_at": datetime.utcnow().isoformat(),
-            "hit": []
-        })
-        save_signals(signals)
+            "targets": targets,
+            "timestamp": timestamp,
+            "status": "active",
+            "chat_id": CHANNEL_ID,
+            "message_id": None
+        }
 
-        bot.reply_to(message, "Signal posted successfully.")
+        with open("signals.json", "w") as f:
+            json.dump(signals, f, indent=4)
+
+        # إرسال الصورة
+        image_path = generate_signal_image(coin, entry, stop_loss, targets)
+        with open(image_path, 'rb') as photo:
+            sent_message = bot.send_photo(CHANNEL_ID, photo)
+
+        # إرسال النص
+        text = format_signal_message(coin, entry, stop_loss, targets)
+        reply_msg = bot.send_message(CHANNEL_ID, text, reply_to_message_id=sent_message.message_id)
+
+        # تحديث الرسالة ID للربط لاحقًا
+        signals[signal_id]["message_id"] = reply_msg.message_id
+        with open("signals.json", "w") as f:
+            json.dump(signals, f, indent=4)
+
+        # بدء المراقبة الآلية
+        start_monitoring(coin, entry, stop_loss, targets, signal_id, timestamp, CHANNEL_ID, reply_msg.message_id, bot)
+
     except Exception as e:
-        bot.reply_to(message, f"Error: {e}")
+        bot.reply_to(message, f"❌ حدث خطأ: {str(e)}")
 
-# Start monitoring thread
-threading.Thread(target=monitor_targets, daemon=True).start()
+# لا داعي لهذا السطر في Railway
+# bot.remove_webhook()
 
-bot.remove_webhook()  # هذا السطر هو المفتاح
+print("Bot is polling...")
 bot.infinity_polling()
