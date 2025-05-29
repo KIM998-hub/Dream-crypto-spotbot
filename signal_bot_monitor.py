@@ -10,7 +10,6 @@ CHANNEL_ID = -1002509422719
 SIGNALS_FILE = "signals.json"
 
 bot = telebot.TeleBot(TOKEN)
-
 symbol_to_id_cache = {}
 
 def save_signal(signal):
@@ -19,11 +18,9 @@ def save_signal(signal):
             signals = json.load(f)
     except:
         signals = []
-
     signals.append(signal)
     with open(SIGNALS_FILE, "w") as f:
         json.dump(signals, f, indent=2)
-
 
 def load_signals():
     try:
@@ -32,19 +29,19 @@ def load_signals():
     except:
         return []
 
-
 def format_percentage(entry, target):
     return round(((target - entry) / entry) * 100, 2)
-
 
 def get_price(symbol):
     try:
         url = f"https://api.coingecko.com/api/v3/simple/price?ids={symbol}&vs_currencies=usdt"
         res = requests.get(url).json()
-        return res[symbol]["usdt"]
-    except:
+        price = res[symbol]["usdt"]
+        print(f"🔍 السعر الحالي لـ {symbol} هو: {price}")
+        return price
+    except Exception as e:
+        print(f"❌ خطأ في get_price لـ {symbol}: {e}")
         return None
-
 
 def coin_symbol_to_id(coin):
     coin = coin.lower()
@@ -52,13 +49,20 @@ def coin_symbol_to_id(coin):
         return symbol_to_id_cache[coin]
 
     url = "https://api.coingecko.com/api/v3/coins/list"
-    response = requests.get(url).json()
-    for item in response:
-        if item["symbol"] == coin:
-            symbol_to_id_cache[coin] = item["id"]
-            return item["id"]
+    try:
+        response = requests.get(url)
+        if response.status_code != 200:
+            print(f"❌ CoinGecko API فشل: {response.status_code}")
+            return None
+        data = response.json()
+        for item in data:
+            if item["symbol"] == coin:
+                symbol_to_id_cache[coin] = item["id"]
+                return item["id"]
+        print(f"❌ لم يتم إيجاد Coin ID لـ {coin}")
+    except Exception as e:
+        print(f"❌ خطأ في CoinGecko: {e}")
     return None
-
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
@@ -103,7 +107,6 @@ def handle_message(message):
 
     except Exception as e:
         bot.reply_to(message, f"حدث خطأ: {e}")
-
 
 def monitor_targets():
     print("🔁 بدأ مراقبة الأسعار...")
@@ -165,9 +168,8 @@ def monitor_targets():
 
         time.sleep(60)
 
-
 # تشغيل المراقبة في الخلفية
 threading.Thread(target=monitor_targets, daemon=True).start()
 
-# تشغيل البوت
-bot.infinity_polling()
+# تشغيل البوت مع إعدادات أفضل للثبات
+bot.infinity_polling(timeout=10, long_polling_timeout=5)
