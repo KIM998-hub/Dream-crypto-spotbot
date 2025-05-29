@@ -1,1 +1,1 @@
-worker: python main.py
+signal_bot_monitor.py
