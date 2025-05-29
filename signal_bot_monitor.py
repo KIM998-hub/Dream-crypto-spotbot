@@ -11,6 +11,7 @@ SIGNALS_FILE = "signals.json"
 
 bot = telebot.TeleBot(TOKEN)
 
+symbol_to_id_cache = {}
 
 def save_signal(signal):
     try:
@@ -46,11 +47,15 @@ def get_price(symbol):
 
 
 def coin_symbol_to_id(coin):
+    coin = coin.lower()
+    if coin in symbol_to_id_cache:
+        return symbol_to_id_cache[coin]
+
     url = "https://api.coingecko.com/api/v3/coins/list"
     response = requests.get(url).json()
-    coin = coin.lower()
     for item in response:
         if item["symbol"] == coin:
+            symbol_to_id_cache[coin] = item["id"]
             return item["id"]
     return None
 
@@ -101,8 +106,11 @@ def handle_message(message):
 
 
 def monitor_targets():
+    print("🔁 بدأ مراقبة الأسعار...")
     while True:
         signals = load_signals()
+        print(f"📡 جاري فحص {len(signals)} توصيات...")
+
         updated = False
 
         for signal in signals:
@@ -111,10 +119,12 @@ def monitor_targets():
 
             coin_id = coin_symbol_to_id(signal["coin"])
             if not coin_id:
+                print(f"❌ فشل في الحصول على ID للعملة {signal['coin']}")
                 continue
 
             price = get_price(coin_id)
             if not price:
+                print(f"❌ لم يتم جلب السعر لـ {signal['coin']}")
                 continue
 
             entry = signal["entry"]
@@ -136,7 +146,7 @@ def monitor_targets():
                     continue
                 if price >= target:
                     percent = format_percentage(entry, target)
-                    msg = f"✅ تم تحقيق الهدف {i+1} بنسبة *{percent}%* بعد {hours}h {minutes}m."
+                    msg = f"🎯 تم تحقيق *هدف {i+1}* بنسبة *{percent}%* بعد {hours}h {minutes}m."
                     send_hit(msg)
                     signal["hit"].append(i)
                     updated = True
@@ -156,5 +166,8 @@ def monitor_targets():
         time.sleep(60)
 
 
+# تشغيل المراقبة في الخلفية
 threading.Thread(target=monitor_targets, daemon=True).start()
+
+# تشغيل البوت
 bot.infinity_polling()
