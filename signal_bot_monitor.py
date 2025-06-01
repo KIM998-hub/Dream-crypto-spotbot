@@ -48,6 +48,20 @@ def get_price(symbol):
 
 def coin_symbol_to_id(coin):
     coin = coin.lower()
+
+    manual_map = {
+        "btc": "bitcoin",
+        "eth": "ethereum",
+        "bnb": "binancecoin",
+        "sol": "solana",
+        "ada": "cardano",
+        "sui": "sui"
+        # أضف المزيد هنا حسب الحاجة
+    }
+
+    if coin in manual_map:
+        return manual_map[coin]
+
     if coin in symbol_to_id_cache:
         return symbol_to_id_cache[coin]
 
@@ -71,7 +85,6 @@ def coin_symbol_to_id(coin):
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     try:
-        # تحليل الرسالة بالتنسيق الجديد مثل: BTC/USDT 105000
         parts = re.split(r'[\s/]+', message.text.strip())
         if len(parts) != 3 or parts[1].upper() != "USDT":
             bot.reply_to(message, "❌ يرجى إرسال التوصية بهذا الشكل: `BTC/USDT 105000`")
@@ -152,7 +165,6 @@ def monitor_targets():
                 )
                 time.sleep(1.5)
 
-            # تحقق من الأهداف
             for i, target in enumerate(signal["targets"]):
                 if i in signal["hit"]:
                     continue
@@ -164,7 +176,6 @@ def monitor_targets():
                     updated = True
                     break
 
-            # تحقق من الستوب
             if "stop" not in signal["hit"] and price <= signal["stop_loss"]:
                 percent = format_percentage(entry, signal["stop_loss"])
                 msg = f"🛑 تم ضرب وقف الخسارة بخسارة *{abs(percent)}%* بعد {hours}h {minutes}m."
@@ -178,9 +189,11 @@ def monitor_targets():
 
         time.sleep(60)
 
-# تشغيل مراقبة الأهداف
-threading.Thread(target=monitor_targets, daemon=True).start()
+# ✅ التشغيل في بيئة خالية من polling
+if __name__ == "__main__":
+    threading.Thread(target=monitor_targets, daemon=True).start()
+    print("✅ بدأ تشغيل مراقبة الأهداف...")
 
-# تشغيل البوت عبر polling
-print("🤖 البوت يعمل الآن ب polling وينتظر الأوامر...")
-bot.infinity_polling()
+    # حلقة إبقاء البوت نشطًا في الخلفية فقط
+    while True:
+        time.sleep(60)
