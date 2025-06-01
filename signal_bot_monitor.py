@@ -4,16 +4,13 @@ import time
 import threading
 import requests
 from datetime import datetime
-from flask import Flask, request
-import os
 
-TOKEN = os.getenv("BOT_TOKEN") or "7653756929:AAGnPLi2VY14mmcV5wsKFIOh8C5uvzfYy2s"
-CHANNEL_ID = int(os.getenv("CHANNEL_ID", "-1002509422719"))
+# ✅ بيانات البوت والقناة
+TOKEN = "7653756929:AAGnPLi2VY14mmcV5wsKFIOh8C5uvzfYy2s"
+CHANNEL_ID = -1002509422719  # Dream crypto spot signals
 SIGNALS_FILE = "signals.json"
 
 bot = telebot.TeleBot(TOKEN)
-app = Flask(__name__)
-
 symbol_to_id_cache = {}
 
 def save_signal(signal):
@@ -154,6 +151,7 @@ def monitor_targets():
                 )
                 time.sleep(1.5)
 
+            # تحقق من الأهداف
             for i, target in enumerate(signal["targets"]):
                 if i in signal["hit"]:
                     continue
@@ -165,6 +163,7 @@ def monitor_targets():
                     updated = True
                     break
 
+            # تحقق من الستوب
             if "stop" not in signal["hit"] and price <= signal["stop_loss"]:
                 percent = format_percentage(entry, signal["stop_loss"])
                 msg = f"🛑 تم ضرب وقف الخسارة بخسارة *{abs(percent)}%* بعد {hours}h {minutes}m."
@@ -178,22 +177,9 @@ def monitor_targets():
 
         time.sleep(60)
 
-# ⏱️ مراقبة الأهداف في Thread
+# تشغيل مراقبة الأهداف
 threading.Thread(target=monitor_targets, daemon=True).start()
 
-# 🌐 Webhook Flask server
-@app.route(f"/{TOKEN}", methods=["POST"])
-def webhook():
-    update = telebot.types.Update.de_json(request.stream.read().decode("utf-8"))
-    bot.process_new_updates([update])
-    return "ok", 200
-
-@app.route("/", methods=["GET"])
-def index():
-    return "بوت التوصيات جاهز ويعمل عبر Webhook! ✅", 200
-
-if __name__ == "__main__":
-    WEBHOOK_URL = f"https://<YOUR-RAILWAY-SUBDOMAIN>.up.railway.app/{TOKEN}"
-    bot.remove_webhook()
-    bot.set_webhook(url=WEBHOOK_URL)
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+# تشغيل البوت عبر polling
+print("🤖 البوت يعمل الآن ب polling وينتظر الأوامر...")
+bot.infinity_polling()
