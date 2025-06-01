@@ -35,8 +35,9 @@ def format_percentage(entry, target):
 def get_price(symbol):
     try:
         url = f"https://api.coingecko.com/api/v3/simple/price?ids={symbol}&vs_currencies=usdt"
-        res = requests.get(url).json()
-        price = res[symbol]["usdt"]
+        res = requests.get(url)
+        time.sleep(1.5)  # ✅ تأخير لتقليل الضغط على CoinGecko
+        price = res.json()[symbol]["usdt"]
         print(f"🔍 السعر الحالي لـ {symbol} هو: {price}")
         return price
     except Exception as e:
@@ -51,6 +52,7 @@ def coin_symbol_to_id(coin):
     url = "https://api.coingecko.com/api/v3/coins/list"
     try:
         response = requests.get(url)
+        time.sleep(1.5)  # ✅ تأخير لتقليل الضغط على CoinGecko
         if response.status_code != 200:
             print(f"❌ CoinGecko API فشل: {response.status_code}")
             return None
@@ -101,12 +103,15 @@ def handle_message(message):
 """ + "\n".join([f"🎯 هدف {i+1}: `{t}`" for i, t in enumerate(targets)])
 
         sent = bot.send_message(CHANNEL_ID, text, parse_mode="Markdown")
+        time.sleep(1.5)  # ✅ تأخير لتقليل الضغط على Telegram
         signal["msg_id"] = sent.message_id
         save_signal(signal)
         bot.reply_to(message, "✅ تم نشر التوصية بنجاح!")
+        time.sleep(1.5)  # ✅ تأخير إضافي
 
     except Exception as e:
         bot.reply_to(message, f"حدث خطأ: {e}")
+        time.sleep(1.5)
 
 def monitor_targets():
     print("🔁 بدأ مراقبة الأسعار...")
@@ -143,6 +148,7 @@ def monitor_targets():
                     reply_to_message_id=signal["msg_id"],
                     parse_mode="Markdown"
                 )
+                time.sleep(1.5)  # ✅ تأخير بعد كل إرسال لتفادي حظر Telegram
 
             for i, target in enumerate(signal["targets"]):
                 if i in signal["hit"]:
@@ -171,5 +177,5 @@ def monitor_targets():
 # تشغيل المراقبة في الخلفية
 threading.Thread(target=monitor_targets, daemon=True).start()
 
-# تشغيل البوت مع إعدادات أفضل للثبات
+# تشغيل البوت مع إعدادات polling محسنة
 bot.infinity_polling(timeout=10, long_polling_timeout=5)
