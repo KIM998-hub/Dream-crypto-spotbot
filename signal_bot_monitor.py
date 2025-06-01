@@ -4,12 +4,16 @@ import time
 import threading
 import requests
 from datetime import datetime
+from flask import Flask, request
+import os
 
-TOKEN = "7653756929:AAGnPLi2VY14mmcV5wsKFIOh8C5uvzfYy2s"
-CHANNEL_ID = -1002509422719
+TOKEN = os.getenv("BOT_TOKEN") or "7653756929:AAGnPLi2VY14mmcV5wsKFIOh8C5uvzfYy2s"
+CHANNEL_ID = int(os.getenv("CHANNEL_ID", "-1002509422719"))
 SIGNALS_FILE = "signals.json"
 
 bot = telebot.TeleBot(TOKEN)
+app = Flask(__name__)
+
 symbol_to_id_cache = {}
 
 def save_signal(signal):
@@ -36,7 +40,7 @@ def get_price(symbol):
     try:
         url = f"https://api.coingecko.com/api/v3/simple/price?ids={symbol}&vs_currencies=usdt"
         res = requests.get(url)
-        time.sleep(1.5)  # ✅ تأخير لتقليل الضغط على CoinGecko
+        time.sleep(1.5)
         price = res.json()[symbol]["usdt"]
         print(f"🔍 السعر الحالي لـ {symbol} هو: {price}")
         return price
@@ -52,7 +56,7 @@ def coin_symbol_to_id(coin):
     url = "https://api.coingecko.com/api/v3/coins/list"
     try:
         response = requests.get(url)
-        time.sleep(1.5)  # ✅ تأخير لتقليل الضغط على CoinGecko
+        time.sleep(1.5)
         if response.status_code != 200:
             print(f"❌ CoinGecko API فشل: {response.status_code}")
             return None
@@ -103,11 +107,11 @@ def handle_message(message):
 """ + "\n".join([f"🎯 هدف {i+1}: `{t}`" for i, t in enumerate(targets)])
 
         sent = bot.send_message(CHANNEL_ID, text, parse_mode="Markdown")
-        time.sleep(1.5)  # ✅ تأخير لتقليل الضغط على Telegram
+        time.sleep(1.5)
         signal["msg_id"] = sent.message_id
         save_signal(signal)
         bot.reply_to(message, "✅ تم نشر التوصية بنجاح!")
-        time.sleep(1.5)  # ✅ تأخير إضافي
+        time.sleep(1.5)
 
     except Exception as e:
         bot.reply_to(message, f"حدث خطأ: {e}")
@@ -148,7 +152,7 @@ def monitor_targets():
                     reply_to_message_id=signal["msg_id"],
                     parse_mode="Markdown"
                 )
-                time.sleep(1.5)  # ✅ تأخير بعد كل إرسال لتفادي حظر Telegram
+                time.sleep(1.5)
 
             for i, target in enumerate(signal["targets"]):
                 if i in signal["hit"]:
@@ -174,8 +178,22 @@ def monitor_targets():
 
         time.sleep(60)
 
-# تشغيل المراقبة في الخلفية
+# ⏱️ مراقبة الأهداف في Thread
 threading.Thread(target=monitor_targets, daemon=True).start()
 
-# تشغيل البوت مع إعدادات polling محسنة
-bot.infinity_polling(timeout=10, long_polling_timeout=5)
+# 🌐 Webhook Flask server
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    update = telebot.types.Update.de_json(request.stream.read().decode("utf-8"))
+    bot.process_new_updates([update])
+    return "ok", 200
+
+@app.route("/", methods=["GET"])
+def index():
+    return "بوت التوصيات جاهز ويعمل عبر Webhook! ✅", 200
+
+if __name__ == "__main__":
+    WEBHOOK_URL = f"https://<YOUR-RAILWAY-SUBDOMAIN>.up.railway.app/{TOKEN}"
+    bot.remove_webhook()
+    bot.set_webhook(url=WEBHOOK_URL)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
