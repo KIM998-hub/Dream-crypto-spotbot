@@ -3,6 +3,7 @@ import json
 import time
 import threading
 import requests
+import re
 from datetime import datetime
 
 # ✅ بيانات البوت والقناة
@@ -70,14 +71,14 @@ def coin_symbol_to_id(coin):
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     try:
-        parts = message.text.strip().split()
-        if len(parts) != 2:
-            bot.reply_to(message, "❌ يرجى إرسال العملة وسعر الدخول فقط، مثل: `SOL 162.3`")
+        # تحليل الرسالة بالتنسيق الجديد مثل: BTC/USDT 105000
+        parts = re.split(r'[\s/]+', message.text.strip())
+        if len(parts) != 3 or parts[1].upper() != "USDT":
+            bot.reply_to(message, "❌ يرجى إرسال التوصية بهذا الشكل: `BTC/USDT 105000`")
             return
 
-        coin, entry_price = parts
-        coin = coin.upper()
-        entry_price = float(entry_price)
+        coin = parts[0].upper()
+        entry_price = float(parts[2])
         stop_loss = round(entry_price * 0.98, 4)
         targets = [
             round(entry_price * (1 + p), 4)
