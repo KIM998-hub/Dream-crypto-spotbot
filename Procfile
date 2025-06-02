@@ -1,1 +1,1 @@
-worker: python signal_bot_monitor.py
+worker: python monitor.py
