@@ -1,1 +1,1 @@
-worker: python monitor.py
+worker: python bot_handler.py
