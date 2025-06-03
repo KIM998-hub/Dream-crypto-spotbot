@@ -1,1 +1,1 @@
-worker: python bot_handler.py
+python signal_publisher.py
