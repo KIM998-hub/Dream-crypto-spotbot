@@ -1,1 +1,1 @@
-python signal_publisher.py
+worker: python signal_publisher.py
