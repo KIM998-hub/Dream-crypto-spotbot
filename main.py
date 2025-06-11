@@ -10,23 +10,21 @@ TARGET_PERCENTAGES = [1.9, 3.9, 8.6, 18.4, 24.2, 32.3, 40.0]
 logging.basicConfig(level=logging.INFO)
 
 def calculate_targets(entry_price: float):
-    targets = [round(entry_price * (1 + pct / 100), 2) for pct in TARGET_PERCENTAGES]
-    stop_loss = round(entry_price * 0.98, 2)
+    targets = [round(entry_price * (1 + pct / 100), 8) for pct in TARGET_PERCENTAGES]
+    stop_loss = round(entry_price * 0.98, 8)
     return stop_loss, targets
 
-def format_signal(pair: str, entry_price: float, stop_loss: float, targets: list):
-    message = f"""🚀 توصية جديدة (سبوت) 🚀
-
-📈 الزوج: {pair.upper()}
-🎯 نقطة الدخول: {entry_price} USDT
-🛡️ وقف الخسارة: {stop_loss} USDT
-
-🎯 أهداف الربح:"""
+def format_signal(coin: str, entry_price: float, stop_loss: float, targets: list):
+    message = (
+        "**Dream crypto spot signals** 🌕\n\n"
+        "🚀 **New Spot Signal (SPOT)** 🚨\n\n"
+        f"📊 **Coin:** {coin.upper()}\n"
+        f"🎯 **Entry Point:** {entry_price}\n"
+        f"🛡️ **Stop Loss:** {stop_loss}\n\n"
+        "🎯 **Targets:**"
+    )
     for i, target in enumerate(targets, start=1):
-        pct = TARGET_PERCENTAGES[i - 1]
-        message += f"\n{i}️⃣ {target} USDT (+{pct}%)"
-    
-    message += "\n\n📢 إدارة رأس المال مسؤوليتك، التزم بخطتك! 🧠"
+        message += f"\n{i}️⃣ {target}"
     return message
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -34,19 +32,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = update.message.text.strip()
         parts = text.split()
         if len(parts) != 2:
-            await update.message.reply_text("⚠️ الرجاء إرسال التوصية بهذا الشكل:\nBTC/USDT 68300")
+            await update.message.reply_text("⚠️ Please send the signal in this format:\nCOIN/USDT 0.0000000")
             return
 
-        pair = parts[0]
+        coin = parts[0]
         entry_price = float(parts[1])
         stop_loss, targets = calculate_targets(entry_price)
-        signal_message = format_signal(pair, entry_price, stop_loss, targets)
+        signal_message = format_signal(coin, entry_price, stop_loss, targets)
 
-        await context.bot.send_message(chat_id=CHANNEL_ID, text=signal_message)
-        await update.message.reply_text("✅ تم نشر التوصية بنجاح.")
+        await context.bot.send_message(chat_id=CHANNEL_ID, text=signal_message, parse_mode="Markdown")
+        await update.message.reply_text("✅ Signal published successfully.")
     except Exception as e:
         logging.error(f"Error: {e}")
-        await update.message.reply_text("❌ حدث خطأ أثناء معالجة التوصية.")
+        await update.message.reply_text("❌ An error occurred while processing the signal.")
 
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
